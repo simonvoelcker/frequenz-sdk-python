@@ -15,3 +15,4 @@
 ## Bug Fixes
 
 - Improved formula validation: Consistent error messages for invalid formulas and conventional span semantics.
+- Removed ChannelRegistry. Streams are not being set up using one-shot channels and owned by the data source.
