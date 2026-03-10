@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
-from frequenz.channels import Broadcast
+from frequenz.channels import Broadcast, BroadcastChannel
 from frequenz.core.datetime import UNIX_EPOCH
 from frequenz.quantities import Quantity
 
@@ -58,14 +58,14 @@ async def init_feature_extractor_no_data(
         PeriodicFeatureExtractor
     """
     # We only need the moving window to initialize the PeriodicFeatureExtractor class.
-    lm_chan = Broadcast[Sample[Quantity]](name="lm_net_power")
+    sender, receiver = BroadcastChannel[Sample[Quantity]](name="lm_net_power")
     moving_window = MovingWindow(
         size=timedelta(seconds=1),
-        resampled_data_recv=lm_chan.new_receiver(),
+        resampled_data_recv=receiver,
         input_sampling_period=timedelta(seconds=1),
     )
     async with moving_window:
-        await lm_chan.new_sender().send(
+        await sender.send(
             Sample(datetime.now(tz=timezone.utc), Quantity(0))
         )
 

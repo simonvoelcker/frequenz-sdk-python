@@ -16,7 +16,8 @@ from collections import abc
 from dataclasses import dataclass
 from datetime import timedelta
 
-from frequenz.channels import Broadcast, Sender
+from frequenz.channels import Sender, BroadcastChannel
+from frequenz.channels._broadcast import BroadcastSender
 from frequenz.client.common.microgrid.components import ComponentId
 from frequenz.client.microgrid.component import Battery, EvCharger, SolarInverter
 
@@ -61,13 +62,13 @@ requests and will be able to keep up with higher request rates in larger install
 
 @dataclass
 class _ActorInfo:
-    """Holds instances of core data pipeline actors and their request channels."""
+    """Holds instances of core data pipeline actors and their request channel senders."""
 
     actor: Actor
     """The actor instance."""
 
-    channel: Broadcast[ComponentMetricRequest]
-    """The request channel for the actor."""
+    sender: BroadcastSender[ComponentMetricRequest]
+    """The request channel sender for the actor."""
 
 
 class _DataPipeline:  # pylint: disable=too-many-instance-attributes
@@ -437,15 +438,15 @@ class _DataPipeline:  # pylint: disable=too-many-instance-attributes
             A Sender for sending requests to the data sourcing actor.
         """
         if self._data_sourcing_actor is None:
-            channel: Broadcast[ComponentMetricRequest] = Broadcast(
-                name="Data Pipeline: Data Sourcing Actor Request Channel"
+            sender, receiver = BroadcastChannel[ComponentMetricRequest](
+                name="Data Pipeline: Data Sourcing Actor Request Channel",
+                limit=_REQUEST_RECV_BUFFER_SIZE,
             )
-            actor = DataSourcingActor(
-                request_receiver=channel.new_receiver(limit=_REQUEST_RECV_BUFFER_SIZE),
-            )
-            self._data_sourcing_actor = _ActorInfo(actor, channel)
+
+            actor = DataSourcingActor(request_receiver=receiver)
+            self._data_sourcing_actor = _ActorInfo(actor, sender)
             self._data_sourcing_actor.actor.start()
-        return self._data_sourcing_actor.channel.new_sender()
+        return self._data_sourcing_actor.sender
 
     def _resampling_request_sender(self) -> Sender[ComponentMetricRequest]:
         """Return a Sender for sending requests to the resampling actor.
@@ -458,20 +459,18 @@ class _DataPipeline:  # pylint: disable=too-many-instance-attributes
         from ._resampling import ComponentMetricsResamplingActor
 
         if self._resampling_actor is None:
-            channel: Broadcast[ComponentMetricRequest] = Broadcast(
-                name="Data Pipeline: Component Metric Resampling Actor Request Channel"
+            sender, receiver = BroadcastChannel[ComponentMetricRequest](
+                name="Data Pipeline: Component Metric Resampling Actor Request Channel",
+                limit=_REQUEST_RECV_BUFFER_SIZE,
             )
             actor = ComponentMetricsResamplingActor(
                 data_sourcing_request_sender=self._data_sourcing_request_sender(),
-                resampling_request_receiver=channel.new_receiver(
-                    limit=_REQUEST_RECV_BUFFER_SIZE,
-                    name=channel.name + " Receiver",
-                ),
+                resampling_request_receiver=receiver,
                 config=self._resampler_config,
             )
-            self._resampling_actor = _ActorInfo(actor, channel)
+            self._resampling_actor = _ActorInfo(actor, sender)
             self._resampling_actor.actor.start()
-        return self._resampling_actor.channel.new_sender()
+        return self._resampling_actor.sender
 
     async def _stop(self) -> None:
         """Stop the data pipeline actors."""

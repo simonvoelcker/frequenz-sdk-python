@@ -7,8 +7,8 @@
 import asyncio
 import logging
 
-from frequenz.channels import Broadcast, OneshotChannel, Receiver, Sender
-from frequenz.channels._broadcast import BroadcastReceiver
+from frequenz.channels import OneshotChannel, Receiver, Sender, BroadcastChannel
+from frequenz.channels._broadcast import BroadcastReceiver, BroadcastSender
 from frequenz.quantities import Quantity
 
 from .._internal._asyncio import cancel_and_await
@@ -53,7 +53,7 @@ class ComponentMetricsResamplingActor(Actor):
             resampling_request_receiver
         )
         self._resampler: Resampler = Resampler(config)
-        self._data_sink_channels: dict[str, Broadcast[Sample[Quantity]]] = {}
+        self._senders: dict[str, BroadcastSender[Sample[Quantity]]] = {}
 
     async def _subscribe_to_data_source(
         self, request: ComponentMetricRequest
@@ -85,23 +85,22 @@ class ComponentMetricsResamplingActor(Actor):
         """
         request_channel_name = request.get_channel_name()
 
-        # If we are already handling this request, answer the request by sending a
-        # new receiver from the existing channel.
-        if data_sink_channel := self._data_sink_channels.get(request_channel_name):
-            await request.telem_stream_sender.send(data_sink_channel.new_receiver())
+        # If we are already handling this request, respond by
+        # creating a new receiver on the existing channel.
+        if existing_sender := self._senders.get(request_channel_name):
+            await request.telem_stream_sender.send(existing_sender.subscribe())
             return
 
-        # Set up data source and sink channels
-        data_source = await self._subscribe_to_data_source(request)
-
-        data_sink_channel = Broadcast(name=request_channel_name, resend_latest=True)
-        await request.telem_stream_sender.send(data_sink_channel.new_receiver())
-        self._data_sink_channels[request_channel_name] = data_sink_channel
+        sender, receiver = BroadcastChannel[Sample[Quantity]](
+            name=request_channel_name, resend_latest=True
+        )
+        await request.telem_stream_sender.send(receiver)
+        self._senders[request_channel_name] = sender
 
         self._resampler.add_timeseries(
             name=request_channel_name,
-            source=data_source,
-            sink=data_sink_channel.new_sender().send,
+            source=await self._subscribe_to_data_source(request),
+            sink=sender.send,
         )
 
     async def _process_resampling_requests(self) -> None:

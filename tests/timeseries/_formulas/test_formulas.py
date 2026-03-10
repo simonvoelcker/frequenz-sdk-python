@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import async_solipsism
 import pytest
-from frequenz.channels import Broadcast, Receiver
+from frequenz.channels import Receiver
+from frequenz.channels._broadcast import BroadcastSender, BroadcastChannel
 from frequenz.client.common.microgrid.components import ComponentId
 from frequenz.quantities import Quantity
 
@@ -45,14 +46,14 @@ class TestFormulas:
     ) -> None:
         """Run a formula test."""
         _logger.debug("TESTING FORMULA: %s", formula_str)
-        channels: OrderedDict[ComponentId, Broadcast[Sample[Quantity]]] = OrderedDict()
+        senders: OrderedDict[ComponentId, BroadcastSender[Sample[Quantity]]] = OrderedDict()
         for comp_id in component_ids:
-            channels[ComponentId(comp_id)] = Broadcast(
+            senders[ComponentId(comp_id)], _ = BroadcastChannel(
                 name=f"chan-#{comp_id}", resend_latest=True
             )
 
         def stream_recv(comp_id: ComponentId) -> Receiver[Sample[Quantity]]:
-            return channels[comp_id].new_receiver()
+            return senders[comp_id].subscribe()
 
         telem_fetcher = MagicMock(spec=ResampledStreamFetcher)
         telem_fetcher.fetch_stream = AsyncMock(side_effect=stream_recv)
@@ -75,12 +76,12 @@ class TestFormulas:
                 now += timedelta(seconds=1)
                 _ = await asyncio.gather(
                     *[
-                        chan.new_sender().send(
+                        sender.send(
                             Sample(now, None if not value else Quantity(value))
                         )
-                        for chan, value in zip(
+                        for sender, value in zip(
                             [
-                                channels[ComponentId(comp_id)]
+                                senders[ComponentId(comp_id)]
                                 for comp_id in component_ids
                             ],
                             io_input,
@@ -545,14 +546,16 @@ class TestFormulaComposition:
         io_pairs: list[tuple[list[float | None], float | None]],
     ) -> None:
         """Run a test with the specs provided."""
-        channels: OrderedDict[int, Broadcast[Sample[Quantity]]] = OrderedDict()
+        senders: OrderedDict[int, BroadcastSender[Sample[Quantity]]] = OrderedDict()
 
         for ctr in range(num_items):
-            channels[ctr] = Broadcast(name=f"chan-#{ctr}", resend_latest=True)
+            senders[ctr], _ = BroadcastChannel(
+                name=f"chan-#{ctr}", resend_latest=True
+            )
 
         def stream_recv(comp_id: int) -> Receiver[Sample[Quantity]]:
             comp_id = int(comp_id)
-            return channels[comp_id].new_receiver()
+            return senders[comp_id].subscribe()
 
         telem_fetcher = MagicMock(spec=ResampledStreamFetcher)
         telem_fetcher.fetch_stream = AsyncMock(side_effect=stream_recv)
@@ -581,8 +584,7 @@ class TestFormulaComposition:
             now += timedelta(seconds=1)
             _ = await asyncio.gather(
                 *[
-                    channels[comp_id]
-                    .new_sender()
+                    senders[comp_id]
                     .send(Sample(now, None if not value else Quantity(value)))
                     for comp_id, value in enumerate(io_input)
                 ]

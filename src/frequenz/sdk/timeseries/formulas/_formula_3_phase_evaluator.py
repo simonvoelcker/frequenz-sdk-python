@@ -7,6 +7,7 @@ import logging
 from typing import Generic
 
 from frequenz.channels import Broadcast, ReceiverStoppedError, Sender
+from frequenz.channels._broadcast import BroadcastSender
 from typing_extensions import override
 
 from ...actor import Actor
@@ -26,7 +27,7 @@ class Formula3PhaseEvaluatingActor(Generic[QuantityT], Actor):
         phase_1: Formula[QuantityT],
         phase_2: Formula[QuantityT],
         phase_3: Formula[QuantityT],
-        output_channel: Broadcast[Sample3Phase[QuantityT]],
+        output_sender: BroadcastSender[Sample3Phase[QuantityT]],
     ) -> None:
         """Initialize this instance.
 
@@ -58,10 +59,7 @@ class Formula3PhaseEvaluatingActor(Generic[QuantityT], Actor):
                 create_method=phase_3._create_method,  # pylint: disable=protected-access
             ),
         ]
-        self._output_channel: Broadcast[Sample3Phase[QuantityT]] = output_channel
-        self._output_sender: Sender[Sample3Phase[QuantityT]] = (
-            self._output_channel.new_sender()
-        )
+        self._output_sender: BroadcastSender[Sample3Phase[QuantityT]] = output_sender
         self._synchronizer: NodeSynchronizer[QuantityT] = NodeSynchronizer()
 
     @override
@@ -76,7 +74,7 @@ class Formula3PhaseEvaluatingActor(Generic[QuantityT], Actor):
                 _logger.debug(
                     "input streams closed; stopping three-phase formula evaluator."
                 )
-                await self._output_channel.close()
+                await self._output_sender._channel.aclose()
                 return
 
             if (
@@ -87,7 +85,7 @@ class Formula3PhaseEvaluatingActor(Generic[QuantityT], Actor):
                 _logger.debug(
                     "One of the three phase samples is None, stopping the evaluator."
                 )
-                await self._output_channel.close()
+                await self._output_sender._channel.aclose()
                 return
 
             if not (

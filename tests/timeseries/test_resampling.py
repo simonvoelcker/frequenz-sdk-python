@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 import async_solipsism
 import pytest
 import time_machine
-from frequenz.channels import Broadcast, SenderError
+from frequenz.channels import SenderError
+from frequenz.channels._broadcast import BroadcastSender, BroadcastReceiver, BroadcastChannel
 from frequenz.quantities import Quantity
 
 from frequenz.sdk.timeseries import (
@@ -40,6 +41,11 @@ from ..utils import a_sequence
 # pylint: disable=too-many-lines,disable=too-many-locals
 
 
+SourceSenderAndReceiver = tuple[
+    BroadcastSender[Sample[Quantity]], BroadcastReceiver[Sample[Quantity]]
+]
+
+
 @pytest.fixture(autouse=True)
 def event_loop_policy() -> async_solipsism.EventLoopPolicy:
     """Return an event loop policy that uses the async solipsism event loop."""
@@ -47,11 +53,11 @@ def event_loop_policy() -> async_solipsism.EventLoopPolicy:
 
 
 @pytest.fixture
-async def source_chan() -> AsyncIterator[Broadcast[Sample[Quantity]]]:
+async def source_sender_and_receiver() -> AsyncIterator[SourceSenderAndReceiver]:
     """Create a broadcast channel of samples."""
-    chan = Broadcast[Sample[Quantity]](name="test")
-    yield chan
-    await chan.close()
+    sender, receiver = BroadcastChannel[Sample[Quantity]](name="test")
+    yield sender, receiver
+    await sender._channel.close()
 
 
 def as_float_tuple(sample: Sample[Quantity]) -> tuple[datetime, float]:
@@ -277,7 +283,7 @@ async def test_calculate_window_end_trivial_cases(
 async def test_resampling_window_size_is_constant(
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test resampling window size is consistent."""
     timestamp = datetime.now(timezone.utc)
@@ -296,8 +302,7 @@ async def test_resampling_window_size_is_constant(
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -375,7 +380,7 @@ async def test_resampling_window_size_is_constant(
 # timer tests.
 async def test_timer_errors_are_logged(  # pylint: disable=too-many-statements
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test that big differences between the expected window end and the fired timer are logged."""
@@ -395,8 +400,7 @@ async def test_timer_errors_are_logged(  # pylint: disable=too-many-statements
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -537,7 +541,7 @@ async def test_timer_errors_are_logged(  # pylint: disable=too-many-statements
 async def test_future_samples_not_included(
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test that future samples are not included in the resampling."""
     timestamp = datetime.now(timezone.utc)
@@ -556,8 +560,7 @@ async def test_future_samples_not_included(
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -635,7 +638,7 @@ async def test_future_samples_not_included(
 async def test_resampling_with_one_window(
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test resampling with one resampling window (saving samples of the last period only)."""
     timestamp = datetime.now(timezone.utc)
@@ -654,8 +657,7 @@ async def test_resampling_with_one_window(
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -762,7 +764,7 @@ async def test_resampling_with_one_window(
 async def test_resampling_with_one_and_a_half_windows(  # pylint: disable=too-many-statements
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test resampling with 1.5 resampling windows."""
     timestamp = datetime.now(timezone.utc)
@@ -781,8 +783,7 @@ async def test_resampling_with_one_and_a_half_windows(  # pylint: disable=too-ma
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -944,7 +945,7 @@ async def test_resampling_with_one_and_a_half_windows(  # pylint: disable=too-ma
 async def test_resampling_with_two_windows(  # pylint: disable=too-many-statements
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test resampling with 2 resampling windows."""
     timestamp = datetime.now(timezone.utc)
@@ -963,8 +964,7 @@ async def test_resampling_with_two_windows(  # pylint: disable=too-many-statemen
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -1124,7 +1124,7 @@ async def test_resampling_with_two_windows(  # pylint: disable=too-many-statemen
 async def test_receiving_stopped_resampling_error(
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test resampling errors if a receiver stops."""
     timestamp = datetime.now(timezone.utc)
@@ -1142,8 +1142,7 @@ async def test_receiving_stopped_resampling_error(
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -1170,7 +1169,7 @@ async def test_receiving_stopped_resampling_error(
     resampling_fun_mock.reset_mock()
 
     # Close channel, try to resample again
-    await source_chan.close()
+    await source_sender._channel.aclose()
     with pytest.raises(SenderError):
         await source_sender.send(sample0s)
     await _advance_time(fake_time, resampling_period_s)
@@ -1238,7 +1237,7 @@ async def test_receiving_resampling_error(
 async def test_timer_is_aligned(
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test that the resampling timer is aligned to the resampling period."""
@@ -1269,8 +1268,7 @@ async def test_timer_is_aligned(
 
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -1389,7 +1387,7 @@ async def test_timer_is_aligned(
 async def test_resampling_all_zeros(
     config_class: type[ResamplerConfig],
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test resampling with one resampling window full of zeros."""
     timestamp = datetime.now(timezone.utc)
@@ -1408,8 +1406,7 @@ async def test_resampling_all_zeros(
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -1509,7 +1506,7 @@ async def test_resampling_all_zeros(
 async def test_resampler_closed_option(
     closed: WindowSide,
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test the `closed` option in ResamplerConfig."""
     timestamp = datetime.now(timezone.utc)
@@ -1528,8 +1525,7 @@ async def test_resampler_closed_option(
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 
@@ -1630,7 +1626,7 @@ async def test_resampler_closed_option(
 async def test_resampler_label_option(
     label: WindowSide,
     fake_time: time_machine.Coordinates,
-    source_chan: Broadcast[Sample[Quantity]],
+    source_sender_and_receiver: SourceSenderAndReceiver,
 ) -> None:
     """Test the `label` option in ResamplerConfig."""
     timestamp = datetime.now(timezone.utc)
@@ -1649,8 +1645,7 @@ async def test_resampler_label_option(
     )
     resampler = Resampler(config)
 
-    source_receiver = source_chan.new_receiver()
-    source_sender = source_chan.new_sender()
+    source_sender, source_receiver = source_sender_and_receiver
 
     sink_mock = AsyncMock(spec=Sink, return_value=True)
 

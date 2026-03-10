@@ -6,7 +6,8 @@
 import logging
 from typing import Generic
 
-from frequenz.channels import Broadcast, ReceiverStoppedError, Sender
+from frequenz.channels import ReceiverStoppedError
+from frequenz.channels._broadcast import BroadcastSender
 from typing_extensions import override
 
 from ...actor import Actor
@@ -24,14 +25,14 @@ class FormulaEvaluatingActor(Generic[QuantityT], Actor):
         self,
         *,
         root: AstNode[QuantityT],
-        output_channel: Broadcast[Sample[QuantityT]],
+        output_sender: BroadcastSender[Sample[QuantityT]],
         metric_fetcher: ResampledStreamFetcher | None = None,
     ) -> None:
         """Create a `FormulaEvaluatingActor` instance.
 
         Args:
             root: The root node of the formula AST.
-            output_channel: The channel to send evaluated samples to.
+            output_sender: The sender to send evaluated samples to.
             metric_fetcher: An optional metric fetcher that needs to be started
                 before the formula can be evaluated.
         """
@@ -39,9 +40,7 @@ class FormulaEvaluatingActor(Generic[QuantityT], Actor):
 
         self._root: AstNode[QuantityT] = root
         self._metric_fetcher: ResampledStreamFetcher | None = metric_fetcher
-        self._output_channel: Broadcast[Sample[QuantityT]] = output_channel
-
-        self._output_sender: Sender[Sample[QuantityT]] = output_channel.new_sender()
+        self._output_sender: BroadcastSender[Sample[QuantityT]] = output_sender
 
     @override
     async def _run(self) -> None:
@@ -63,9 +62,11 @@ class FormulaEvaluatingActor(Generic[QuantityT], Actor):
                     "No more input samples available; stopping formula evaluator. (%s)",
                     self._root,
                 )
-                await self._output_channel.close()
+                # auto-closing channels are not supported yet
+                await self._output_sender._channel.aclose()
                 return
-            except Exception:  # pylint: disable=broad-except
+            except Exception as ex:  # pylint: disable=broad-except
                 _logger.exception("Error evaluating formula %s", self._root)
-                await self._output_channel.close()
+                # auto-closing channels are not supported yet
+                await self._output_sender._channel.aclose()
                 return

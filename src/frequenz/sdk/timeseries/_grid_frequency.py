@@ -8,8 +8,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from frequenz.channels import Broadcast, OneshotChannel, Receiver, Sender
-from frequenz.channels._broadcast import BroadcastReceiver
+from frequenz.channels import OneshotChannel, Receiver, Sender, BroadcastChannel
+from frequenz.channels._broadcast import BroadcastReceiver, BroadcastSender
 from frequenz.channels.experimental import Pipe
 from frequenz.client.microgrid.component import Component, EvCharger, Inverter, Meter
 from frequenz.client.microgrid.metrics import Metric
@@ -66,7 +66,7 @@ class GridFrequency:
         # because we must return a receiver synchronously in new_receiver.
         # The "real" channel for telemetry must be created in and owned by
         # MicrogridApiSource, otherwise streams would not be reused.
-        self._forwarding_channel: Broadcast[Sample[Quantity]] | None = None
+        self._forwarding_channel_sender: BroadcastSender[Sample[Quantity]] | None = None
 
         # Sadly needed for testing
         self._task: None | asyncio.Task[None] = None
@@ -106,13 +106,16 @@ class GridFrequency:
         Returns:
             A receiver that will receive grid frequency samples.
         """
-        if self._forwarding_channel is None:
-            self._forwarding_channel = Broadcast(name="Forward frequency samples")
-            self._task = asyncio.create_task(
-                self._send_request(self._forwarding_channel.new_sender())
+        if self._forwarding_channel_sender is None:
+            self._forwarding_channel_sender, receiver = BroadcastChannel[Sample[Quantity]](
+                name="Forward frequency samples",
             )
+            self._task = asyncio.create_task(
+                self._send_request(self._forwarding_channel_sender)
+            )
+            return self._map_frequency_samples(receiver)
 
-        return self._map_frequency_samples(self._forwarding_channel.new_receiver())
+        return self._map_frequency_samples(self._forwarding_channel_sender.subscribe())
 
     async def subscribe(self) -> Receiver[Sample[Frequency]]:
         """Create a receiver for grid frequency."""
