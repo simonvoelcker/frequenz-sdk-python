@@ -9,7 +9,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Generic
 
-from frequenz.channels import Broadcast, Receiver
+from frequenz.channels import Receiver, BroadcastChannel
 from typing_extensions import override
 
 from frequenz.sdk.timeseries.formulas._resampled_stream_fetcher import (
@@ -69,13 +69,16 @@ class Formula(BackgroundService, Generic[QuantityT]):
         self._create_method: Callable[[float], QuantityT] = create_method
         self._sub_formulas: list[Formula[QuantityT]] = sub_formulas or []
 
-        self._channel: Broadcast[Sample[QuantityT]] = Broadcast(
+        self._sender, _ = BroadcastChannel[Sample[QuantityT]](
             name=f"{self}",
             resend_latest=True,
         )
+        # auto-closing channels are not supported yet
+        self._sender._channel._auto_close_enabled = False
+
         self._evaluator: FormulaEvaluatingActor[QuantityT] = FormulaEvaluatingActor(
             root=self._root,
-            output_channel=self._channel,
+            output_sender=self._sender,
             metric_fetcher=metric_fetcher,
         )
 
@@ -88,7 +91,7 @@ class Formula(BackgroundService, Generic[QuantityT]):
         """Subscribe to the formula evaluator to get evaluated samples."""
         if not self._evaluator.is_running:
             self.start()
-        return self._channel.new_receiver(limit=max_size)
+        return self._sender.subscribe(limit=max_size)
 
     @override
     def start(self) -> None:

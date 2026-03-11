@@ -11,7 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Generic
 
-from frequenz.channels import Broadcast, Receiver
+from frequenz.channels import Receiver
+from frequenz.channels._broadcast import BroadcastChannel
 from typing_extensions import override
 
 from ...actor import BackgroundService
@@ -49,19 +50,19 @@ class Formula3Phase(BackgroundService, Generic[QuantityT]):
         self._formula_p3: Formula[QuantityT] = phase_3
         self._create_method: Callable[[float], QuantityT] = phase_1._create_method
 
-        self._channel: Broadcast[Sample3Phase[QuantityT]] = Broadcast(
+        self._sender, _ = BroadcastChannel[Sample3Phase[QuantityT]](
             name=f"[Formula3Phase:{name}]({phase_1.name})"
         )
         self._sub_formulas: list[Formula3Phase[QuantityT]] = sub_formulas or []
         self._evaluator: Formula3PhaseEvaluatingActor[QuantityT] = (
-            Formula3PhaseEvaluatingActor(phase_1, phase_2, phase_3, self._channel)
+            Formula3PhaseEvaluatingActor(phase_1, phase_2, phase_3, self._sender)
         )
 
     def new_receiver(self, *, max_size: int = 50) -> Receiver[Sample3Phase[QuantityT]]:
         """Subscribe to the output of this formula."""
         if not self._evaluator.is_running:
             self.start()
-        return self._channel.new_receiver(limit=max_size)
+        return self._sender.subscribe(limit=max_size)
 
     @override
     def start(self) -> None:

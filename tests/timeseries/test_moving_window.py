@@ -12,7 +12,7 @@ import async_solipsism
 import numpy as np
 import pytest
 import time_machine
-from frequenz.channels import Broadcast, Sender
+from frequenz.channels import Broadcast, Sender, BroadcastChannel
 from frequenz.core.datetime import UNIX_EPOCH
 from frequenz.quantities import Quantity
 
@@ -75,15 +75,14 @@ def init_moving_window(
     Returns:
         tuple[MovingWindow, Sender[Sample]]: A pair of sender and `MovingWindow`.
     """
-    lm_chan = Broadcast[Sample[Quantity]](name="lm_net_power")
-    lm_tx = lm_chan.new_sender()
+    sender, receiver = BroadcastChannel[Sample[Quantity]](name="lm_net_power")
     window = MovingWindow(
         size=size,
-        resampled_data_recv=lm_chan.new_receiver(),
+        resampled_data_recv=receiver,
         input_sampling_period=timedelta(seconds=1),
         resampler_config=resampler_config,
     )
-    return window, lm_tx
+    return window, sender
 
 
 def dt(i: int) -> datetime:  # pylint: disable=invalid-name
@@ -531,8 +530,7 @@ async def test_wait_for_samples_with_resampling(
 # pylint: disable=redefined-outer-name
 async def test_resampling_window(fake_time: time_machine.Coordinates) -> None:
     """Test resampling in MovingWindow."""
-    channel = Broadcast[Sample[Quantity]](name="net_power")
-    sender = channel.new_sender()
+    sender, receiver = BroadcastChannel[Sample[Quantity]](name="net_power")
 
     window_size = timedelta(seconds=16)
     input_sampling = timedelta(seconds=1)
@@ -541,7 +539,7 @@ async def test_resampling_window(fake_time: time_machine.Coordinates) -> None:
 
     async with MovingWindow(
         size=window_size,
-        resampled_data_recv=channel.new_receiver(),
+        resampled_data_recv=receiver,
         input_sampling_period=input_sampling,
         resampler_config=resampler_config,
     ) as window:
@@ -562,15 +560,14 @@ async def test_resampling_window(fake_time: time_machine.Coordinates) -> None:
 
 async def test_moving_window_length(fake_time: time_machine.Coordinates) -> None:
     """Test moving window length without resampling."""
-    channel = Broadcast[Sample[Quantity]](name="net_power")
-    sender = channel.new_sender()
+    sender, receiver = BroadcastChannel[Sample[Quantity]](name="net_power")
 
     window_size = timedelta(seconds=1)
     input_sampling = timedelta(seconds=0.1)
 
     async with MovingWindow(
         size=window_size,
-        resampled_data_recv=channel.new_receiver(),
+        resampled_data_recv=receiver,
         input_sampling_period=input_sampling,
     ) as window:
         assert window.capacity == window_size / input_sampling, "Wrong window capacity"

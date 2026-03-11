@@ -8,8 +8,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from frequenz.channels import Broadcast, Receiver
-from frequenz.channels._broadcast import BroadcastSender
+from frequenz.channels import Receiver
+from frequenz.channels._broadcast import BroadcastSender, BroadcastChannel
 from frequenz.client.common.microgrid.components import ComponentId
 from frequenz.client.microgrid.component import ComponentCategory
 from frequenz.client.microgrid.metrics import Metric
@@ -173,8 +173,8 @@ class MicrogridApiSource:
             ComponentId, dict[Metric | TransitionalMetric, list[ComponentMetricRequest]]
         ] = {}
 
-        self._channels: dict[str, Broadcast[Sample[Quantity]]] = {}
-        """Metric data channels by channel name, to enable reuse."""
+        self._senders: dict[str, BroadcastSender[Sample[Quantity]]] = {}
+        """Metric data senders by channel name, to enable reuse."""
 
     async def _get_component_category(
         self, comp_id: ComponentId
@@ -413,14 +413,16 @@ class MicrogridApiSource:
             senders = []
             for request in req_list:
                 channel_name = request.get_channel_name()
-                # Create missing channels and inform the requesting side via oneshot
-                if channel_name not in self._channels:
-                    telem_stream: Broadcast[Sample[Quantity]] = Broadcast(
+                # Create missing senders and inform the requesting side via oneshot
+                if channel_name not in self._senders:
+                    telem_stream_sender, telem_stream_receiver = BroadcastChannel[Sample[Quantity]](
                         name=channel_name
                     )
-                    self._channels[channel_name] = telem_stream
-                    await request.telem_stream_sender.send(telem_stream.new_receiver())
-                senders.append(self._channels[channel_name].new_sender())
+                    self._senders[channel_name] = telem_stream_sender
+                    await request.telem_stream_sender.send(telem_stream_receiver)
+                    senders.append(telem_stream_sender)
+                else:
+                    senders.append(self._senders[channel_name].clone())
             all_senders.append((extraction_method, senders))
 
         return all_senders

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import async_solipsism
 import pytest
 import time_machine
-from frequenz.channels import Broadcast, OneshotChannel, Receiver, Sender
+from frequenz.channels import Broadcast, OneshotChannel, Receiver, Sender, BroadcastChannel
 from frequenz.channels._broadcast import BroadcastReceiver
 from frequenz.client.common.microgrid.components import ComponentId
 from frequenz.client.microgrid.metrics import Metric
@@ -128,11 +128,11 @@ async def test_single_request(
         assert data_source_req.telem_stream_sender != telem_stream_sender
 
         # Create the telemetry stream on behalf of nonexisting data sourcing actor
-        telem_stream: Broadcast[Sample[Quantity]] = Broadcast(name="Telemetry stream")
-        await data_source_req.telem_stream_sender.send(telem_stream.new_receiver())
+        sender, receiver = BroadcastChannel[Sample[Quantity]](name="Telemetry stream")
+        await data_source_req.telem_stream_sender.send(receiver)
 
         await _assert_resampling_works(
-            timeseries_sender=telem_stream.new_sender(),
+            timeseries_sender=sender,
             timeseries_receiver=await telem_stream_receiver.receive(),
             fake_time=fake_time,
         )
@@ -177,11 +177,11 @@ async def test_duplicate_request(
             await asyncio.wait_for(data_source_req_recv.receive(), timeout=0.1)
 
         # Create the telemetry stream on behalf of nonexisting data sourcing actor
-        telem_stream: Broadcast[Sample[Quantity]] = Broadcast(name="Telemetry stream")
-        await data_source_req.telem_stream_sender.send(telem_stream.new_receiver())
+        sender, receiver = BroadcastChannel[Sample[Quantity]](name="Telemetry stream")
+        await data_source_req.telem_stream_sender.send(receiver)
 
         await _assert_resampling_works(
-            timeseries_sender=telem_stream.new_sender(),
+            timeseries_sender=sender,
             timeseries_receiver=await telem_stream_receiver.receive(),
             fake_time=fake_time,
         )
@@ -228,13 +228,13 @@ async def test_resubscribe(fake_time: time_machine.Coordinates) -> None:
 
         # Create the telemetry stream on behalf of nonexisting data sourcing actor
         data_source_req = await data_source_req_recv.receive()
-        telem_stream: Broadcast[Sample[Quantity]] = Broadcast(name="Telemetry stream")
-        await data_source_req.telem_stream_sender.send(telem_stream.new_receiver())
+        sender, receiver = BroadcastChannel[Sample[Quantity]](name="Telemetry stream")
+        await data_source_req.telem_stream_sender.send(receiver)
 
         resampled_stream_receiver = await telem_stream_receiver.receive()
 
         await _assert_resampling_works(
-            timeseries_sender=telem_stream.new_sender(),
+            timeseries_sender=sender,
             timeseries_receiver=resampled_stream_receiver,
             fake_time=fake_time,
         )
@@ -255,7 +255,7 @@ async def test_resubscribe(fake_time: time_machine.Coordinates) -> None:
         assert resent_sample.timestamp == _now()
 
         await _assert_resampling_works(
-            timeseries_sender=telem_stream.new_sender(),
+            timeseries_sender=sender,
             timeseries_receiver=resampled_stream_receiver,
             fake_time=fake_time,
         )

@@ -8,7 +8,8 @@ import asyncio
 import math
 from datetime import datetime
 
-from frequenz.channels import Broadcast, Receiver, Sender
+from frequenz.channels import Receiver, Sender, BroadcastChannel
+from frequenz.channels._broadcast import BroadcastSender
 from frequenz.client.common.microgrid.components import ComponentId
 from frequenz.client.microgrid.metrics import Metric
 from frequenz.quantities import Quantity
@@ -41,17 +42,17 @@ class MockResampler:
     ) -> None:
         """Create a `MockDataPipeline` instance."""
         self._data_pipeline = _DataPipeline(resampler_config)
-        self._channel_lookup: dict[str, Broadcast[Sample[Quantity]]] = {}
-        self._resampler_request_channel = Broadcast[ComponentMetricRequest](
+        self._senders: dict[str, BroadcastSender[Sample[Quantity]]] = {}
+        self._resampler_request_sender, _ = BroadcastChannel[ComponentMetricRequest](
             name="resampler-request",
             resend_latest=True,
         )
         self._input_channels_receivers: dict[str, list[Receiver[Sample[Quantity]]]] = {}
 
-        def get_or_create_channel(name: str) -> Broadcast[Sample[Quantity]]:
-            if name not in self._channel_lookup:
-                self._channel_lookup[name] = Broadcast[Sample[Quantity]](name=name)
-            return self._channel_lookup[name]
+        def get_or_create_sender(name: str) -> BroadcastSender[Sample[Quantity]]:
+            if name not in self._senders:
+                self._senders[name], _ = BroadcastChannel[Sample[Quantity]](name=name)
+            return self._senders[name]
 
         def metric_senders(
             comp_ids: list[ComponentId],
@@ -60,9 +61,9 @@ class MockResampler:
             senders: list[Sender[Sample[Quantity]]] = []
             for comp_id in comp_ids:
                 name = f"{comp_id}:{metric_id}"
-                senders.append(get_or_create_channel(name).new_sender())
+                senders.append(get_or_create_sender(name))
                 self._input_channels_receivers[name] = [
-                    get_or_create_channel(name).new_receiver()
+                    get_or_create_sender(name).subscribe()
                     for _ in range(namespaces)
                 ]
             return senders
@@ -114,21 +115,21 @@ class MockResampler:
 
                 senders.append(
                     [
-                        get_or_create_channel(p1_name).new_sender(),
-                        get_or_create_channel(p2_name).new_sender(),
-                        get_or_create_channel(p3_name).new_sender(),
+                        get_or_create_sender(p1_name),
+                        get_or_create_sender(p2_name),
+                        get_or_create_sender(p3_name),
                     ]
                 )
                 self._input_channels_receivers[p1_name] = [
-                    get_or_create_channel(p1_name).new_receiver()
+                    get_or_create_sender(p1_name).subscribe()
                     for _ in range(namespaces)
                 ]
                 self._input_channels_receivers[p2_name] = [
-                    get_or_create_channel(p2_name).new_receiver()
+                    get_or_create_sender(p2_name).subscribe()
                     for _ in range(namespaces)
                 ]
                 self._input_channels_receivers[p3_name] = [
-                    get_or_create_channel(p3_name).new_receiver()
+                    get_or_create_sender(p3_name).subscribe()
                     for _ in range(namespaces)
                 ]
             return senders
@@ -213,7 +214,7 @@ class MockResampler:
         await asyncio.gather(*tasks_to_stop)
 
     def _resampling_request_sender(self) -> Sender[ComponentMetricRequest]:
-        return self._resampler_request_channel.new_sender()
+        return self._resampler_request_sender.clone()
 
     async def _channel_forward_messages(
         self, receiver: Receiver[Sample[Quantity]], sender: Sender[Sample[Quantity]]
@@ -222,27 +223,28 @@ class MockResampler:
             await sender.send(sample)
 
     async def _handle_resampling_requests(self) -> None:
-        async for request in self._resampler_request_channel.new_receiver():
+        async for request in self._resampler_request_sender.subscribe():
             name = request.get_channel_name()
 
             if name in self._forward_tasks:
-                # Forward task exists, but we must create a new receiver
-                # from the existing channel and return it to the request sender.
-                assert name in self._channel_lookup
-                output_channel = self._channel_lookup[name]
-                await request.telem_stream_sender.send(output_channel.new_receiver())
+                # Forward task exists, but we must create a new subscription
+                # from the existing sender and return it to the request sender.
+                assert name in self._senders
+                output_sender = self._senders[name]
+                await request.telem_stream_sender.send(output_sender.subscribe())
                 continue
 
             input_chan_recv_name = f"{request.component_id}:{request.metric}"
             input_chan_recv = self._input_channels_receivers[input_chan_recv_name].pop()
             assert input_chan_recv is not None
 
-            if name not in self._channel_lookup:
-                self._channel_lookup[name] = Broadcast(name=name, resend_latest=True)
+            if name not in self._senders:
+                self._senders[name], _ = BroadcastChannel[Sample[Quantity]](
+                    name=name, resend_latest=True
+                )
 
-            output_channel = self._channel_lookup[name]
-            output_chan_sender = output_channel.new_sender()
-            await request.telem_stream_sender.send(output_channel.new_receiver())
+            output_chan_sender = self._senders[name]
+            await request.telem_stream_sender.send(output_chan_sender.subscribe())
 
             task = asyncio.create_task(
                 self._channel_forward_messages(

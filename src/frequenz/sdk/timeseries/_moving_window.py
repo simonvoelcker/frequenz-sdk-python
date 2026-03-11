@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import SupportsIndex, assert_never, overload
 
 import numpy as np
-from frequenz.channels import Broadcast, Receiver, Sender
+from frequenz.channels import Broadcast, Receiver, Sender, BroadcastChannel
 from frequenz.core.datetime import UNIX_EPOCH
 from frequenz.quantities import Quantity
 from numpy.typing import ArrayLike
@@ -393,11 +393,9 @@ class MovingWindow(BackgroundService):
                 # Wake up all coroutines waiting for new samples.
                 self._condition_new_sample.notify_all()
 
-        resampler_channel = Broadcast[Sample[Quantity]](name="average")
-        self._resampler_sender = resampler_channel.new_sender()
-        self._resampler.add_timeseries(
-            "avg", resampler_channel.new_receiver(), sink_buffer
-        )
+        sender, receiver = BroadcastChannel[Sample[Quantity]](name="average")
+        self._resampler_sender = sender
+        self._resampler.add_timeseries("avg", receiver, sink_buffer)
         self._tasks.add(
             asyncio.create_task(self._resampler.resample(), name="resample")
         )

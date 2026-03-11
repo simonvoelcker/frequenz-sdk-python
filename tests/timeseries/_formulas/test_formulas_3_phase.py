@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import async_solipsism
 import pytest
-from frequenz.channels import Broadcast, Receiver
+from frequenz.channels import Receiver
+from frequenz.channels._broadcast import BroadcastSender, BroadcastChannel
 from frequenz.quantities import Quantity
 
 from frequenz.sdk.timeseries import Sample
@@ -49,13 +50,13 @@ class TestFormula3Phase:
         ],
     ) -> None:
         """Run a test for 3-phase formulas."""
-        channels: OrderedDict[int, Broadcast[Sample[Quantity]]] = OrderedDict()
+        senders: OrderedDict[int, BroadcastSender[Sample[Quantity]]] = OrderedDict()
 
         def stream_recv(comp_id: int) -> Receiver[Sample[Quantity]]:
             comp_id = int(comp_id)
-            if comp_id not in channels:
-                channels[comp_id] = Broadcast(name=f"chan-#{comp_id}")
-            return channels[comp_id].new_receiver()
+            if comp_id not in senders:
+                senders[comp_id], _ = BroadcastChannel[Sample[Quantity]](name=f"chan-#{comp_id}")
+            return senders[comp_id].subscribe()
 
         telem_fetcher = MagicMock(spec=ResampledStreamFetcher)
         telem_fetcher.fetch_stream = AsyncMock(side_effect=stream_recv)
@@ -91,8 +92,7 @@ class TestFormula3Phase:
         for inputs, expected_output in io_pairs:
             _ = await asyncio.gather(
                 *[
-                    channels[formula_id * 3 + phase_idx]
-                    .new_sender()
+                    senders[formula_id * 3 + phase_idx]
                     .send(
                         Sample(
                             timestamp=now,
